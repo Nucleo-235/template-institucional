@@ -1,0 +1,8 @@
+.best_in_place, .form_in_place {
+  input, textarea {
+    color: $base-black !important;
+  }
+  input:not([type=button]):not([type=reset]):not([type=submit]), textarea {
+    width: 100%;
+  }
+}

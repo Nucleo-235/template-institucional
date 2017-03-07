@@ -1,0 +1,54 @@
+@mixin standard_link_button($bgcolor, $textcolor) {
+  background-color: $bgcolor;
+  color: $textcolor;
+  text-decoration: none;
+  &:visited {
+    color: $textcolor;
+    text-decoration: none;
+  }
+  &:hover {
+    color: $textcolor;   
+    background-color: darken($bgcolor, 10%);
+    text-decoration: none;
+  }
+  &:active {
+    color: $textcolor;
+    text-decoration: none;
+  }
+}
+
+@mixin standard_link($bgcolor, $textcolor) {
+  background-color: $bgcolor;
+  color: $textcolor;
+  &:visited {
+    color: $textcolor;
+  }
+  &:hover {
+    color: darken($textcolor, 10%);
+  }
+  &:active {
+    color: $textcolor;
+  }
+}
+
+@mixin bg_size($bg_size) {
+  -webkit-background-size:$bg_size !important;
+  -moz-background-size:$bg_size !important;
+  -o-background-size:$bg_size !important;
+  background-size:$bg_size !important;
+}
+
+@mixin el_filter($filter) {
+  // -webkit-filter: drop-shadow(5px 0px 10px #000);
+  -webkit-filter: $filter;
+  -moz-filter: $filter;
+  -o-filter: $filter;
+  filter: $filter;
+}
+
+@mixin box_shadow($shadow) {
+  -webkit-box-shadow:$shadow;
+     -moz-box-shadow:$shadow;
+       -o-box-shadow:$shadow;
+          box-shadow:$shadow;
+}

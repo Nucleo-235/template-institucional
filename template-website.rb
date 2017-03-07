@@ -45,6 +45,7 @@ gem 'jquery-easing-rails'
 gem 'font-awesome-rails'
 gem 'bourbon'
 gem 'noty-rails'
+gem "bower-rails", "~> 0.11.0"
 
 # view helpers/generators
 gem 'simple_form'
@@ -64,11 +65,13 @@ gem 'omniauth-instagram'
 gem 'omniauth-twitter'
 gem 'omniauth-linkedin'
 gem 'omniauth-google-oauth2'
+gem 'hashie', '~> 3.4'
 
 # mail, analytics & logs
 gem 'madmimi'
 gem 'google-analytics-rails'
 gem 'rollbar'
+
 
 gem_group :development do
   gem 'annotate', '>=2.6.0'
@@ -132,35 +135,6 @@ rake "db:reset", :env => 'test'
 rake "db:reset", :env => 'development'
 rake "db:create", :env => 'test'
 rake "db:create", :env => 'development'
-
-# Clean up Assets
-# ==================================================
-# Use SASS extension for application.css
-run "mv app/assets/stylesheets/application.css app/assets/stylesheets/application.css.scss"
-# Remove the require_tree directives from the SASS and JavaScript files.
-# It's better design to import or require things manually.
-run "sed -i '' /require_tree/d app/assets/javascripts/application.js"
-run "sed -i '' /require_tree/d app/assets/stylesheets/application.css.scss"
-# Add bourbon to stylesheet file
-run "echo >> app/assets/stylesheets/application.css.scss"
-run "echo '@import \"bourbon\";' >>  app/assets/stylesheets/application.css.scss"
-run "echo '@import \"bootstrap-sprockets\";' >>  app/assets/stylesheets/application.css.scss"
-run "echo '@import \"bootstrap\";' >>  app/assets/stylesheets/application.css.scss"
-run "echo '@import \"font-awesome\";' >>  app/assets/stylesheets/application.css.scss"
-
-# Add bourbon to jquery, bootstrap and best_in_place to javascript file
-run "echo '//= require jquery' >> app/assets/javascripts/application.js"
-run "echo '//= require bootstrap-sprockets' >> app/assets/javascripts/application.js"
-run "echo '//= require best_in_place' >> app/assets/javascripts/application.js"
-run "echo '//= require jquery_ujs' >> app/assets/javascripts/application.js"
-run "echo '//= require best_in_place' >> app/assets/javascripts/application.js"
-run "echo '//= require inplace_editing' >> app/assets/javascripts/application.js"
-run "echo '
-$(document).ready(function() {
-  /* Activating Best In Place */
-  jQuery(\".best_in_place\").best_in_place();
-});
-' >> app/assets/javascripts/application.js"
 
 
 generate 'simple_form:install --bootstrap'
@@ -249,7 +223,7 @@ CarrierWave.configure do |config|
     config.aws_bucket =  \"#{app_name}.live\"
   elsif (Rails.env.development? && Rails.application.secrets.aws_access_key_id.present?)
     config.storage = :aws
-    config.aws_bucket =  \"#{app_name}.dev\"
+    config.aws_bucket =  \"#{app_name}.staging\"
   else
     config.storage = :file
     config.aws_bucket =  \"#{app_name}\"
@@ -264,12 +238,24 @@ CarrierWave.configure do |config|
 end
 EOF"
 
+run "cat << EOF >> config/initializers/setup_mailer.rb
+ActionMailer::Base.smtp_settings = {
+  :address              => ENV['MAILER_SERVER'],
+  :port                 => 587,
+  :user_name            => ENV['MAILER_USER'],
+  :password             => ENV['MAILER_PASS'],
+  :authentication       => :login,
+  :enable_starttls_auto => true
+}
+"
+
 copy_file "template_file_size_validator.rb", "lib/file_size_validator.rb"
 inside('app') do 
   run "mkdir uploaders" 
 end
 #run "cp ../../template_user_image_uploader.rb app/uploaders/user_image_uploader.rb"
 copy_file "template_user_image_uploader.rb", "app/uploaders/user_image_uploader.rb"
+copy_file "template_regular_uploader.rb", "app/uploaders/regular_uploader.rb"
 
 gsub_file "app/models/user.rb", /class User < ActiveRecord::Base/,  "require 'file_size_validator'
 
@@ -294,9 +280,9 @@ gsub_file "app/models/user.rb", /include DeviseTokenAuth::Concerns::User/,  "inc
   validates :image, allow_blank: true, file_size: { maximum: 3.megabytes.to_i,  message: \"O arquivo enviado é muito grande. Tamanho máximo 3 MB.\"}"
 
 gsub_file "app/controllers/application_controller.rb", /protect_from_forgery with: :exception/,  "protect_from_forgery with: :exception
-  before_action :set_locale
-  before_action :persist_locale
-  before_action :set_editor_config
+  before_action :set_locale, unless: :devise_controller?
+  before_action :persist_locale, unless: :devise_controller?
+  before_action :set_editor_config, unless: :devise_controller?
   before_action :set_localizable_page
 
   def after_sign_up_path_for(resource)
@@ -313,22 +299,32 @@ gsub_file "app/controllers/application_controller.rb", /protect_from_forgery wit
 
   private
     def redirect_to_locale_if_not_set
-        if params[:locale]
-          I18n.locale = params[:locale]
-          # current_user_or_visitor.update(locale: I18n.locale.to_s)
-        else
-          locale = request_locale || I18n.default_locale
-          redirect_to url_for(request.params.merge({ locale: locale }))
+      if params[:locale]
+        begin
+          I18n.locale = string_to_locale(params[:locale]).to_sym
+        rescue
+          redirect_to url_for(request.params.merge({ locale: I18n.default_locale }))
         end
+        # current_user_or_visitor.update(locale: I18n.locale.to_s)
+      else
+        locale = request_locale || I18n.default_locale
+        redirect_to url_for(request.params.merge({ locale: locale }))
       end
+    end
 
     def get_locale
       # params[:locale] || visitor_locale || request_locale || I18n.default_locale
-      params[:locale] || request_locale || I18n.default_locale
+      params[:locale] ? string_to_locale(params[:locale]) : (session[:locale] || request_locale || I18n.default_locale)
     end
 
     def set_locale
-      I18n.locale = get_locale
+      current_locale = get_locale.to_sym
+      if I18n.available_locales.include? current_locale
+        I18n.locale = current_locale
+        session[:locale] = current_locale
+      else
+        redirect_to url_for(request.params.merge({ locale: I18n.default_locale }))
+      end
     end
 
     def persist_locale
@@ -340,6 +336,21 @@ gsub_file "app/controllers/application_controller.rb", /protect_from_forgery wit
       locale = http_accept_language.preferred_language_from(I18n.available_locales + extra_locales)
       locale = 'pt-BR' if locale == :pt || locale.to_s.downcase == 'pt-pt' || locale.to_s.downcase == 'pt-br'
       locale
+    end
+
+    def default_url_options(options = {})
+      args = { locale: get_locale }
+      # logger.debug args.to_json
+      args
+    end
+
+    def string_to_locale(value)
+      locale_values = value.split('-')
+      if locale_values.length == 2
+        return \"\#\{locale_values[0]\}-\#\{locale_values[1].upcase\}\"
+      else
+        return locale_values[0]
+      end
     end
 
     def set_editor_config
@@ -379,3 +390,15 @@ gsub_file "config/initializers/rollbar.rb", /if Rails.env.test?
   else
     config.access_token = ENV['ROLLBAR_ACCESS_TOKEN']
   end"
+
+run "rails g bower_rails:initialize json"
+copy_file ".bowerrc", ".bowerrc", force: true
+copy_file "bower.json", "bower.json", force: true
+
+# Clean up Assets
+# ==================================================
+remove_file 'app/assets/stylesheets/application.css'
+remove_file 'app/assets/javascripts/application.js'
+
+directory "stylesheets", "app/assets/stylesheets"
+directory "javascripts", "app/assets/javascripts"
